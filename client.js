@@ -3,15 +3,15 @@ var play = require('play');
 var request = require('request');
 var self = this
 
-var OmegaupEndpoint = "localhost:8080"
-var ContestAlias = "all-events"
+var OmegaupEndpoint = "omegaup.com"
+var ContestAlias = process.argv[4]
 var SocketKeepaliveTimeout = 30000
 var ConnectRetryTimeout = 5000
-var Username = 'test'
-var Pass	= 'testtest' 
-var UseSSL = false
+var Username =  process.argv[2]
+var Pass	=  process.argv[3]  
+var UseSSL = true
 
-function startWebSocket() {
+function startWebSocket(retryFn) {
 	self.ws = new WebSocket((UseSSL ? 'wss://' :  'ws://') + OmegaupEndpoint + '/api/contest/events/' + ContestAlias, "com.omegaup.events", {
 		headers: {
 			'Cookie': self.authCookie
@@ -56,13 +56,49 @@ function startWebSocket() {
 	  console.log(error);
 	  play.sound('./sounds/gameover.wav');
 
-	  clearInterval(self.socket_keepalive);	
+	  retryFn();
 	});
 
 	self.ws.on('close', function(error) {
 	  console.log(":( Connection Closed.");
 	  console.log(error);
 	  play.sound('./sounds/gameover.wav');
+
+	  retryFn();
+
+	});
+}
+
+function getAuthToken(callback, retryFn) {
+	// Get auth token
+	//
+	console.log("YEY! Starting. Getting omegaUp auth token for " + Username)
+	request.post((UseSSL ? 'https://' :  'http://') + OmegaupEndpoint + '/api/user/login', {
+			form: {
+				usernameOrEmail: Username,
+				password: Pass
+			}
+		}, 
+		function(error, response, body) {		
+			if (!error && response.statusCode == 200) {
+				console.log(body)
+				var b = JSON.parse(body)
+				self.authCookie = 'ouat=' + b.auth_token
+				callback()
+			}
+			else {
+				console.log("X_X Epic fail");
+				console.log(error);
+				console.log("/house.jpg");
+				play.sound('./sounds/gameover.wav');
+
+				retryFn();
+			}
+		} 
+	);
+}
+
+function cleanupAndRetry() {
 
 	  // Cleanup
 	  //
@@ -71,35 +107,14 @@ function startWebSocket() {
 
 	  // Retry
 	  //
-	  console.log(":O Retrying connection.");
-	  setTimeout(startWebSocket, ConnectRetryTimeout)
+	  console.log(":O Retrying connection.");	  
+	  setTimeout(
+	  	function() { 
+	  		getAuthToken(startWebSocket, cleanupAndRetry) 
+	  	}, ConnectRetryTimeout)
 
-	});
 }
 
-// Get auth token
-//
-console.log("YEY! Starting. Getting omegaUp auth token for " + Username)
-request.post((UseSSL ? 'https://' :  'http://') + OmegaupEndpoint + '/api/user/login', {
-		form: {
-			usernameOrEmail: Username,
-			password: Pass
-		}
-	}, 
-	function(error, response, body) {		
-		if (!error && response.statusCode == 200) {
-			console.log(body)
-			var b = JSON.parse(body)
-			self.authCookie = 'ouat=' + b.auth_token
-			startWebSocket()
-		}
-		else {
-			console.log("X_X Epic fail");
-			console.log(error);
-			console.log("/house.jpg");
-			play.sound('./sounds/gameover.wav');
-		}
-	} 
-);
+getAuthToken(startWebSocket, cleanupAndRetry);
 
 
